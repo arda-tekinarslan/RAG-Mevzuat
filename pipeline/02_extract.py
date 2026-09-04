@@ -3,9 +3,10 @@ import json
 from pathlib import Path
 import pdfplumber
 
-RAW = Path("data/raw")
-TEXT = Path("data/text")
-STATS = Path("extract_stats.jsonl")
+KOK = Path(__file__).parent.parent
+RAW = KOK / "data" / "raw"
+TEXT = KOK / "data" / "text"
+STATS = KOK / "extract_stats.jsonl"
 
 TEXT.mkdir(parents=True, exist_ok=True)
 out = STATS.open("w", encoding="utf-8")

@@ -1,13 +1,15 @@
 """Birebir dedup. Kullanım: python dedup.py"""
 import json, hashlib, re, collections
 from pathlib import Path
+KOK = Path(__file__).parent.parent
+MANIFEST = KOK / "corpus_manifest.jsonl"
 
 def normalize(t):
     t = t.lower()
     t = re.sub(r"[^\wçğıöşü\s]", " ", t)
     return re.sub(r"\s+", " ", t).strip()
 
-kayitlar = [json.loads(s) for s in open("corpus_manifest.jsonl", encoding="utf-8")]
+kayitlar = [json.loads(s) for s in open(MANIFEST, encoding="utf-8")]
 gorulen = {}
 sayac = collections.Counter()
 
@@ -16,7 +18,7 @@ for r in kayitlar:
         sayac[r["red_sebebi"]] += 1
         continue
 
-    metin = Path(r["text_path"]).read_text(encoding="utf-8")
+    metin = (KOK / r["text_path"]).read_text(encoding="utf-8")
     h = hashlib.sha256(normalize(metin).encode()).hexdigest()
     r["sha256"] = h
 
@@ -29,7 +31,7 @@ for r in kayitlar:
         gorulen[h] = r["doc_id"]
         sayac["accepted"] += 1
 
-with open("corpus_manifest.jsonl", "w", encoding="utf-8") as f:
+with open(MANIFEST, "w", encoding="utf-8") as f:
     for r in kayitlar:
         f.write(json.dumps(r, ensure_ascii=False) + "\n")
 

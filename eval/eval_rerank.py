@@ -6,8 +6,9 @@ import chromadb
 import numpy as np
 from sentence_transformers import SentenceTransformer,CrossEncoder
 
-EVAL_PATH =Path("eval_set.jsonl")
-DB_DIR = Path("data/chroma_db")
+KOK = Path(__file__).parent.parent
+EVAL_PATH = KOK / "eval_set.jsonl"
+DB_DIR = KOK / "data" / "chroma_db"
 COLLECTION_NAME = "mevzuat_strategy_b"
 MODEL_NAME = "intfloat/multilingual-e5-small"
 RERANK_MODEL = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"

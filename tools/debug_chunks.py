@@ -13,8 +13,9 @@ import re
 import sys
 from pathlib import Path
 
-NORM_DIR = Path("data/norm")
-CHUNKS_PATH = Path("data/chunks_strategy_b.jsonl")
+KOK = Path(__file__).parent.parent
+NORM_DIR = KOK / "data" / "norm"
+CHUNKS_PATH = KOK / "data" / "chunks_strategy_b.jsonl"
 
 # chunk_b.py ile AYNI regex olmalı — burada değiştirirsen orada da değiştir
 MADDE = re.compile(r"(Madde|MADDE|GEÇİCİ MADDE|EK MADDE)\s*(\d+)")

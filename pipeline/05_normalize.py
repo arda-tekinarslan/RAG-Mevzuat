@@ -2,9 +2,9 @@
 import json, re
 from pathlib import Path
 
-SRC = Path("data/text")
-DST = Path("data/norm")
-DST.mkdir(parents=True, exist_ok=True)
+KOK = Path(__file__).parent.parent
+SRC = KOK / "data" / "text"
+DST = KOK / "data" / "norm"
 
 # Yapisal satirlar: bunlar kendi satirinda kalmali
 YAPI = re.compile(
@@ -55,12 +55,12 @@ def birlestir(satirlar):
         out.append(" ".join(tampon))
     return [x for x in out if x]
 
-kayitlar = [json.loads(s) for s in open("corpus_manifest.jsonl", encoding="utf-8")]
+kayitlar = [json.loads(s) for s in open(KOK / "corpus_manifest.jsonl", encoding="utf-8")]
 n = 0
 for r in kayitlar:
     if r["durum"] != "accepted":
         continue
-    ham = Path(r["text_path"]).read_text(encoding="utf-8")
+    ham = (KOK / r["text_path"]).read_text(encoding="utf-8") 
     satirlar = [s for s in ham.split("\n") if not DIPNOT.match(s.strip())]
     metin = "\n\n".join(birlestir(satirlar))
     (DST / f"{r['doc_id']}.txt").write_text(metin, encoding="utf-8")

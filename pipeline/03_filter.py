@@ -1,16 +1,17 @@
 """Kabul filtresi + manifest. Kullanım: python filter.py"""
 import json, collections
 from pathlib import Path
+KOK = Path(__file__).parent.parent
 
 MIN_KARAKTER = 3000
 MIN_KAR_PER_SAYFA = 200
 
 index = {json.loads(s)["doc_id"]: json.loads(s)
-         for s in open("mevzuat_index.jsonl", encoding="utf-8")}
+         for s in open(KOK / "mevzuat_index.jsonl", encoding="utf-8")}
 stats = {json.loads(s)["doc_id"]: json.loads(s)
-         for s in open("extract_stats.jsonl", encoding="utf-8")}
+         for s in open(KOK / "extract_stats.jsonl", encoding="utf-8")}
 
-out = open("corpus_manifest.jsonl", "w", encoding="utf-8")
+out = open(KOK / "corpus_manifest.jsonl", "w", encoding="utf-8")
 sayac = collections.Counter()
 
 for doc_id, st in stats.items():

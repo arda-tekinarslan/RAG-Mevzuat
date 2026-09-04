@@ -5,8 +5,9 @@ from pathlib import Path
 import chromadb
 from sentence_transformers import SentenceTransformer
 
-EVAL_PATH = Path("eval_set.jsonl")
-DB_DIR = Path("data/chroma_db")
+KOK = Path(__file__).parent.parent
+EVAL_PATH = KOK / "eval_set.jsonl"
+DB_DIR = KOK / "data" / "chroma_db"
 COLLECTION_NAME = "mevzuat_strategy_b"#her chunk dört şey id (chunk_id), embedding (384 boyutlu vektör), document (chunk metni), metadata (doc_id, madde_no, baslik, char_len)
 MODEL_NAME = "intfloat/multilingual-e5-small"
 

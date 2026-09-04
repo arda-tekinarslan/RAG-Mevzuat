@@ -20,9 +20,10 @@ SPLIT_OVERLAP = 100     # SADECE uzun madde bölünürken kullanılır (yapay s�
 MADDE_ARAMA_SINIRI = 150
 
 # --- Dosya yolları ---
-MANIFEST_PATH = Path("corpus_manifest.jsonl")        # hangi dokümanlar kabul edildi, oradan okuyacağız
-NORM_DIR = Path("data/norm")                         # normalize.py'nin çıktısı; girdi klasörümüz
-OUTPUT_PATH = Path("data/chunks_strategy_b.jsonl") 
+KOK = Path(__file__).parent.parent
+MANIFEST_PATH = KOK / "corpus_manifest.jsonl"
+NORM_DIR = KOK / "data" / "norm"
+OUTPUT_PATH = KOK / "data" / "chunks_strategy_b.jsonl"   # a için _a 
 
 # --- Desenler ---
 # normalize.py'de aynı desenler var; orada blokları OLUŞTURMAK için, burada TANIMAK için kullanıyoruz.

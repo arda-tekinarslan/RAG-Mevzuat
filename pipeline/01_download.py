@@ -30,8 +30,9 @@ urllib3.disable_warnings()
 import requests
 
 PDF_BASE = "https://www.mevzuat.gov.tr/mevzuatmetin"
-INDEX = Path("mevzuat_index.jsonl")
-RAW = Path("data/raw")
+KOK = Path(__file__).parent.parent
+INDEX = KOK / "mevzuat_index.jsonl"
+RAW = KOK / "data" / "raw"
 UYKU = 1.0
 
 # Hedef adet (aday). ~%15 fire bekliyoruz, kanun/yönetmelik PDF'leri temiz.

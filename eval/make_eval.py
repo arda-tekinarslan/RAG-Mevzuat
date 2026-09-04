@@ -4,9 +4,10 @@ import sys
 from pathlib import Path
 import ollama
 
-CHUNKS_PATH = Path("data/chunks_strategy_b.jsonl")
-CANDIDATES_PATH = Path("eval_candidates.jsonl")
-EVAL_PATH = Path("eval_set.jsonl")
+KOK = Path(__file__).parent.parent
+CHUNKS_PATH = KOK / "data" / "chunks_strategy_b.jsonl"
+CANDIDATES_PATH = KOK / "eval" / "eval_candidates.jsonl"
+EVAL_PATH = KOK / "eval_set.jsonl"
 
 MODEL_NAME = "qwen2.5:3b-instruct"
 HEDEF_SORU = 80          # eleme sonrası ~50 kalmasını bekliyoruz

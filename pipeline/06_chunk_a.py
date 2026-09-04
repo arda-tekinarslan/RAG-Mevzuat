@@ -5,9 +5,10 @@ import statistics
 CHUNK_SIZE = 800
 OVERLAP = 100
 STEP = CHUNK_SIZE - OVERLAP  # 700 karakter kaydırma
-MANIFEST_PATH = Path("corpus_manifest.jsonl")
-NORM_DIR = Path("data/norm")
-OUTPUT_PATH = Path("data/chunks_strategy_a.jsonl")
+KOK = Path(__file__).parent.parent
+MANIFEST_PATH = KOK / "corpus_manifest.jsonl"
+NORM_DIR = KOK / "data" / "norm"
+OUTPUT_PATH = KOK / "data" / "chunks_strategy_a.jsonl"   # a için _a
 
 def chunk_document_fixed(text: str, doc_id: str) -> list[dict]:
     chunks = []

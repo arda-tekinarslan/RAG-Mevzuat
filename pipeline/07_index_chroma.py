@@ -4,9 +4,10 @@ from pathlib import Path
 import chromadb
 from sentence_transformers import SentenceTransformer
 
-CHUNKS_PATH = Path("data/chunks_strategy_b.jsonl")
-MANIFEST_PATH = Path("corpus_manifest.jsonl")
-DB_DIR = Path("data/chroma_db")
+KOK = Path(__file__).parent.parent
+CHUNKS_PATH = KOK / "data" / "chunks_strategy_b.jsonl"
+MANIFEST_PATH = KOK / "corpus_manifest.jsonl"
+DB_DIR = KOK / "data" / "chroma_db"
 COLLECTION_NAME = "mevzuat_strategy_b"
 MODEL_NAME = "intfloat/multilingual-e5-small"
 BATCH_SIZE = 256  # RAM ve GPU verimliliği için batch boyutu
