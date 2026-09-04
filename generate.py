@@ -71,7 +71,7 @@ CEVAP:"""
 def generate(prompt:str)->str:
     response = ollama.chat(model=LLM_MODEL,
         messages=[{"role":"user","content":prompt}],
-        options={"temperature":0.2}
+        options={"temperatures":0.2}
         )
     return response["message"]["content"]
 
