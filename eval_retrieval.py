@@ -7,7 +7,7 @@ from sentence_transformers import SentenceTransformer
 
 EVAL_PATH = Path("eval_set.jsonl")
 DB_DIR = Path("data/chroma_db")
-COLLECTION_NAME = "mevzuat_strategy_b"
+COLLECTION_NAME = "mevzuat_strategy_b"#her chunk dört şey id (chunk_id), embedding (384 boyutlu vektör), document (chunk metni), metadata (doc_id, madde_no, baslik, char_len)
 MODEL_NAME = "intfloat/multilingual-e5-small"
 
 TOP_K = 10
@@ -40,7 +40,7 @@ def main():
         sonuc = collection.query(query_embeddings=[q_vec.tolist()],n_results=TOP_K) #Soruya göre bize en iyi 10 chunkı getiriyor
         sureler.append(time.perf_counter() - t0)
 
-        metadatalar = sonuc["metadatas"][0]
+        metadatalar = sonuc["metadatas"][0] #iç içe liste bu yüzden 0 ile direk listeyi alıyoruz matrisin ilk satırını almak gibi
 
         bulunan_rank = None
         for rank,meta in enumerate(metadatalar):
