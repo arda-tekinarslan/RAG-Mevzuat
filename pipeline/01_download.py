@@ -3,8 +3,8 @@ mevzuat.gov.tr toplu PDF indirme.
 
 Kullanım:
     pip install requests datasets
-    python mevzuat_download.py index      # (Tur,Tertip,No) listesi -> mevzuat_index.jsonl
-    python mevzuat_download.py download   # PDF'ler -> data/raw/
+    python pipeline/01_download.py index      # (Tur,Tertip,No) listesi -> mevzuat_index.jsonl
+    python pipeline/01_download.py download   # PDF'ler -> data/raw/
 
 Mantık:
   PDF URL kalıbı sabit:

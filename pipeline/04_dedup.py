@@ -1,4 +1,8 @@
-"""Birebir dedup. Kullanım: python dedup.py"""
+"""Birebir dedup (sha256). Kullanim: python pipeline/04_dedup.py
+
+03_filter.py bu scriptten SONRA calistirilirsa buradaki duplicate isaretleri
+silinir; 03 bunu tespit edip uyariyor.
+"""
 import json, hashlib, re, collections
 from pathlib import Path
 KOK = Path(__file__).parent.parent
@@ -24,7 +28,7 @@ for r in kayitlar:
 
     if h in gorulen:
         r["durum"] = "duplicate"
-        r["red_sebebi"] = "duplicate"          # ← bu satır
+        r["red_sebebi"] = "duplicate"
         r["duplicate_of"] = gorulen[h]
         sayac["duplicate"] += 1
     else:
