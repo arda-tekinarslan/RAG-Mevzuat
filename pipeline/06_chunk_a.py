@@ -32,8 +32,12 @@ def chunk_document_fixed(text: str, doc_id: str) -> list[dict]:
         end = start + CHUNK_SIZE
         chunk_text = text[start:end]
         
-        # Son parça 100 karakterin altındaysa ayrı chunk yapma (zaten overlap içinde var)
-        if len(chunk_text) < OVERLAP and chunks:
+        # Son parca tamamen bir onceki chunk'in overlap'i icinde kaliyorsa ayri
+        # chunk yapma. Esik OVERLAP idi: 101-150 karakterlik kuyruklar kendi
+        # chunk'ini aliyordu ama icerigin tamami onceki chunk'in son 100
+        # karakterinde zaten vardi - A vs B karsilastirmasinda A'nin chunk
+        # sayisini sisiriyordu.
+        if end >= text_len and chunks and len(chunk_text) <= OVERLAP + STEP // 2:
             break
             
         chunks.append({

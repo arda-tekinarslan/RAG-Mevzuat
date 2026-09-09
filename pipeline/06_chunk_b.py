@@ -1,215 +1,193 @@
 """
 Strateji B: Madde sınırından chunking.
 
-Strateji A (chunk_a.py) metni 800 karakterden kör kesiyordu — bir maddenin
-ortasından bölmek, hem retrieval'ı hem cevabın okunabilirliğini bozuyor.
-Burada normalize.py'nin ürettiği yapıyı kullanıyoruz: her madde kendi bloğunda.
+Strateji A (06_chunk_a.py) metni 800 karakterden kör kesiyordu — bir maddenin
+ortasından bölmek hem retrieval'ı hem cevabın okunabilirliğini bozuyor.
+Burada 05_normalize.py'nin ürettiği yapıyı kullanıyoruz: her madde kendi bloğunda.
 
-Kullanım: python chunk_b.py
+Kullanım: python pipeline/06_chunk_b.py
 """
 
-import json          # chunk'ları JSONL olarak yazmak ve manifest'i okumak için
-import re            # madde/yapı başlıklarını tanımak için düzenli ifadeler
-import statistics    # sonunda medyan chunk uzunluğunu hesaplamak için
-from pathlib import Path   # dosya yollarını işletim sisteminden bağımsız yazmak için
+import json
+import statistics
+import sys
+from pathlib import Path
 
-# --- Ayarlar (bunları değiştirip sonucu ölçebilirsin) ---
-MAX_CHUNK = 1200        # bir chunk en fazla bu kadar karakter; aşan madde bölünür
-MIN_CHUNK = 200         # bundan kısa chunk tek başına kalmasın, sonrakiyle birleşsin
-SPLIT_OVERLAP = 100     # SADECE uzun madde bölünürken kullanılır (yapay sınır attığımız tek yer)
-MADDE_ARAMA_SINIRI = 150
-
-# --- Dosya yolları ---
 KOK = Path(__file__).parent.parent
+sys.path.insert(0, str(KOK))
+
+from desenler import YAPI_BLOK, madde_no_bul      # noqa: E402
+
+# --- Ayarlar ---
+MAX_CHUNK = 1200        # bir chunk en fazla bu kadar karakter (artık GERÇEKTEN)
+MIN_CHUNK = 200         # bundan kısa chunk tek başına kalmasın (madde sınırı hariç)
+SPLIT_OVERLAP = 100     # SADECE uzun madde bölünürken (yapay sınır attığımız tek yer)
+KESIM_PENCERESI = 200   # cümle sınırı ararken geriye bakılacak karakter
+
 MANIFEST_PATH = KOK / "corpus_manifest.jsonl"
 NORM_DIR = KOK / "data" / "norm"
-OUTPUT_PATH = KOK / "data" / "chunks_strategy_b.jsonl"   # a için _a 
-
-# --- Desenler ---
-# normalize.py'de aynı desenler var; orada blokları OLUŞTURMAK için, burada TANIMAK için kullanıyoruz.
-# Grup 2 (\d+) madde numarasını yakalar — metadata'ya yazacağımız değer o.
-MADDE = re.compile(r"(Madde|MADDE|GEÇİCİ MADDE|EK MADDE)\s*(\d+)")
-
-# "BİRİNCİ KISIM", "İKİNCİ BÖLÜM" gibi yapısal başlıklar.
-# Bunlar tek başına anlam taşımaz — chunk yapmayıp sonraki maddeye yapıştıracağız.
-YAPI = re.compile(
-    r"^(BİRİNCİ|İKİNCİ|ÜÇÜNCÜ|DÖRDÜNCÜ|BEŞİNCİ|ALTINCI|YEDİNCİ|SEKİZİNCİ|"
-    r"DOKUZUNCU|ONUNCU|[A-ZÇĞİÖŞÜ\s]+)\s*(KİTAP|KISIM|BÖLÜM|AYIRIM)"
-)
+OUTPUT_PATH = KOK / "data" / "chunks_strategy_b.jsonl"
 
 
-# ------------------------------------------------------------- TODO 1
-def madde_no_bul(blok: str) -> str | None:
+def _kesim_noktasi(blok: str, ideal: int) -> int:
     """
-    Neden lazım: chunk metadata'sına madde numarasını koyacağız. "Cevap 5237
-    sayılı kanunun 81. maddesinden geldi" demek, "şu dosyadan geldi"den güçlü.
+    ideal'den en fazla KESIM_PENCERESI kadar geriye giderek cümle/kelime
+    sınırı bulur.
 
-    İpucu: MADDE regex'inin 2. grubu (\\d+) madde numarasını yakalıyor.
-    DİKKAT: normalize.py madde başlığını maddenin ÖNÜNE ekliyor
-    ("Adam öldürme Madde 81 — ..."), yani match() bloğun başında eşleşmeyebilir.
-    search() kullanırsan metnin ortasındaki "madde 5'e göre" gibi atıfları da
-    yakalarsın. data/norm/*.txt içinden birkaç bloğa bakıp karar ver.
+    Eskiden bölme doğrudan blok[start:start+MAX_CHUNK] idi ve kelimenin
+    ortasından kesiyordu ("...nazım plân" | "yon plânlarını yapmak...").
+    Hem embedding'i hem LLM'in okuduğu metni bozuyordu.
     """
-    m = MADDE.search(blok[:MADDE_ARAMA_SINIRI])
-    return m.group(2) if m else None
+    alt = max(0, ideal - KESIM_PENCERESI)
+    for desen in (". ", "; ", " "):
+        p = blok.rfind(desen, alt, ideal)
+        if p != -1:
+            return p + len(desen)
+    return ideal
 
 
-# ------------------------------------------------------------- TODO 2
 def uzun_bloku_bol(blok: str) -> list[str]:
-    """
-    blok: MAX_CHUNK'tan uzun tek bir madde metni
-    dönüş: parçalanmış metin listesi, her biri <= MAX_CHUNK
+    """MAX_CHUNK'tan uzun metni cümle sınırlarından parçalar. Kısaysa aynen döner."""
+    if len(blok) <= MAX_CHUNK:
+        return [blok]
 
-    Strateji A'daki kayan pencere mantığının aynısı — ama her metne değil,
-    sadece gerçekten uzun maddelere uygulanıyor. Fark bu.
-
-    İpucu: chunk_a.py'deki chunk_document_fixed'in döngüsünü örnek al:
-        start = 0, adım = MAX_CHUNK - SPLIT_OVERLAP
-        while start < len(blok): dilimle, ekle, ilerlet
-    """
     parcalar = []
-    adim = MAX_CHUNK - SPLIT_OVERLAP
     start = 0
     while start < len(blok):
-        parca = blok[start:start + MAX_CHUNK]
-        if len(parca) < SPLIT_OVERLAP and parcalar:
+        if len(blok) - start <= MAX_CHUNK:
+            parcalar.append(blok[start:])
             break
-        parcalar.append(parca)
-        start += adim
+        kes = _kesim_noktasi(blok, start + MAX_CHUNK)
+        parcalar.append(blok[start:kes])
+        # SPLIT_OVERLAP kadar geri sar; kes her zaman start'tan büyük olduğu
+        # için ilerleme garanti (MAX_CHUNK > KESIM_PENCERESI + SPLIT_OVERLAP).
+        geri = max(kes - SPLIT_OVERLAP, start + 1)
+        # Geri sarma da kelime ortasına düşmesin. Kesim noktası cümle
+        # sınırındaydı ama overlap ham karakter sayımıyla geriye gidiyordu,
+        # dolayısıyla devam chunk'ları yarım kelimeyle başlayabiliyordu.
+        bosluk = blok.find(" ", geri)
+        if bosluk != -1 and bosluk + 1 < kes:
+            geri = bosluk + 1
+        start = geri
     return parcalar
 
 
-# ------------------------------------------------------------- TODO 3
 def chunk_document_madde(text: str, doc_id: str) -> list[dict]:
     """
-    text:   data/norm/{doc_id}.txt içeriği (bloklar "\\n\\n" ile ayrılmış)
-    doc_id: doküman kimliği
-    dönüş: chunk sözlükleri listesi:
-        {"chunk_id": f"{doc_id}_b_{idx:04d}", "doc_id": doc_id,
-         "text": ..., "char_len": ..., "madde_no": ... veya None}
-    Akış:
-      1. text'i "\\n\\n" ile bloklara ayır
-      2. Blokları sırayla gez, bir "tampon" biriktir:
-         - YAPI satırıysa: tek başına chunk yapma, tampona ekle
-         - Normal blok/madde ise: tampona ekle
-      3. Tampon MIN_CHUNK'ı geçtiyse chunk olarak kapat, tamponu sıfırla
-      4. Tek blok MAX_CHUNK'tan uzunsa uzun_bloku_bol ile parçala
-      5. Döngü bitince tamponda kalan varsa onu da chunk yap
-    madde_no: chunk'ın İLK maddesinin numarası (birleşme olduysa ilkini yaz)..
+    Bloklardan chunk üretir. Sözleşme: bir chunk EN FAZLA BİR madde başlığı
+    içerir ve MAX_CHUNK'ı aşmaz.
     """
-
-    chunks = []
-    tampon = [] #Daha chunk olamamız MIN_CHUNKI geçememiş şeyler beklete yeri
-    tampon_madde = None #Tampondaki ilk madde numarası
+    chunks: list[dict] = []
+    tampon: list[str] = []
+    tampon_madde: str | None = None
+    tampon_yapi_disi = False   # tamponda yapısal başlık dışında içerik var mı
     idx = 0
 
-    def close_tampon():
-        nonlocal tampon, tampon_madde, idx
+    def tampon_uzunluk() -> int:
+        # "\n\n" ayırıcıları da sayılır; eskiden sayılmıyordu ve uzunluk
+        # kontrolü bu yüzden 2*(blok-1) karakter yanılıyordu.
+        return sum(len(b) for b in tampon) + 2 * max(len(tampon) - 1, 0)
+
+    def close_tampon() -> None:
+        nonlocal tampon, tampon_madde, tampon_yapi_disi, idx
         if not tampon:
             return
-        metin = "\n\n".join(tampon)
-
-        chunks.append({
-            "chunk_id": f"{doc_id}_b_{idx:04d}",
-            "doc_id": doc_id,
-            "text": metin,
-            "char_len": len(metin),
-            "madde_no": tampon_madde,
-        })
-        idx += 1
-        tampon = []
-        tampon_madde = None
+        madde = tampon_madde
+        # Tek çıkış noktası: her chunk buradan geçer, dolayısıyla MAX_CHUNK
+        # garantisi tek yerde uygulanıyor. Eskiden yapısal başlık tampona
+        # boyut kontrolsüz ekleniyordu ve 51 chunk 1200 sınırını aşıyordu
+        # (en uzunu 1383) — e5'in 512 token penceresini de zorluyordu.
+        for parca in uzun_bloku_bol("\n\n".join(tampon)):
+            chunks.append({
+                "chunk_id": f"{doc_id}_b_{idx:04d}",
+                "doc_id": doc_id,
+                "text": parca,
+                "char_len": len(parca),
+                "madde_no": madde,
+            })
+            idx += 1
+        tampon, tampon_madde, tampon_yapi_disi = [], None, False
 
     for blok in text.split("\n\n"):
         blok = blok.strip()
         if not blok:
             continue
 
-        # Yapısal başlık (BİRİNCİ BÖLÜM vb.): tek başına chunk olmasın, tampona bekle
-        if YAPI.match(blok):
+        # Yapısal başlık (BİRİNCİ BÖLÜM vb.) tek başına anlam taşımaz —
+        # SONRAKİ maddeye yapışmalı. Tamponda gerçek içerik varsa önce onu
+        # kapat, yoksa başlık bir önceki maddenin kuyruğuna yapışırdı.
+        if YAPI_BLOK.match(blok):
+            if tampon_yapi_disi:
+                close_tampon()
             tampon.append(blok)
             continue
 
-        if len(blok) > MAX_CHUNK:
-            # Tamponda sadece başlık gibi kısa bir şey varsa, onu ayrı chunk yapma —
-            # uzun bloğun önüne ekle ki '?ÜÇÜNCÜ BÖLÜM İade' gibi 17 karakterlik
-            # işe yaramaz chunk'lar oluşmasın.
-            tampon_metin = "\n\n".join(tampon)
-            if tampon and len(tampon_metin) < MIN_CHUNK:
-                blok = tampon_metin + "\n\n" + blok
-                tampon = []
-                tampon_madde = None
-            else:
-                close_tampon()
+        blok_madde = madde_no_bul(blok)
 
-            blok_madde = madde_no_bul(blok)
-            for parca in uzun_bloku_bol(blok):
-                chunks.append({
-                    "chunk_id": f"{doc_id}_b_{idx:04d}",
-                    "doc_id": doc_id,
-                    "text": parca,
-                    "char_len": len(parca),
-                    "madde_no": blok_madde,  # parçaların hepsi aynı maddeden
-                })
-                idx += 1
-            continue
+        # IKI AYRI MADDEYI ASLA BIRLESTIRME.
+        # Eskiden MIN_CHUNK dolmadigi icin kisa maddeler bir sonrakine
+        # yapisiyordu ve metadata sadece ILK maddeyi yaziyordu. Korpusta
+        # 1822 chunk (%11.2) birden fazla madde iceriyordu. Somut ornek:
+        # TCK Madde 81 (87 karakter) + Madde 82 tek chunk'ta, etiketi "81" —
+        # LLM'in "adam oldurme" sorusunda yanlis madde alintilamasinin nedeni.
+        # 87 karakterlik dogru bir chunk, iki maddeyi karistiran 912
+        # karakterlik bir chunk'tan iyidir.
+        if blok_madde is not None and tampon_madde is not None:
+            close_tampon()
 
         tampon.append(blok)
+        tampon_yapi_disi = True
         if tampon_madde is None:
-            tampon_madde = madde_no_bul(blok)
+            tampon_madde = blok_madde
 
-        if sum(len(b) for b in tampon) >= MIN_CHUNK:
+        if tampon_uzunluk() >= MIN_CHUNK:
             close_tampon()
 
     close_tampon()
     return chunks
 
 
-def main():
+def main() -> None:
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
- 
-    # Manifest'ten sadece "accepted" dokümanlar — rejected/duplicate korpusa girmez
+
+    # Manifest'ten sadece "accepted" dokumanlar
     accepted_docs = []
     with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
         for line in f:
             item = json.loads(line)
             if item.get("durum") == "accepted":
                 accepted_docs.append(item["doc_id"])
- 
+
     all_chunks = []
     for doc_id in accepted_docs:
         norm_file = NORM_DIR / f"{doc_id}.txt"
         if not norm_file.exists():
             continue
-        text = norm_file.read_text(encoding="utf-8")
-        all_chunks.extend(chunk_document_madde(text, doc_id))
- 
+        all_chunks.extend(chunk_document_madde(
+            norm_file.read_text(encoding="utf-8"), doc_id))
+
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         for chunk in all_chunks:
-            # ensure_ascii=False: Türkçe karakterler kaçış dizisi değil, doğrudan yazılsın
             f.write(json.dumps(chunk, ensure_ascii=False) + "\n")
- 
-    # --- Ölçüm ---
+
     if not all_chunks:
-        print("Hiç chunk üretilmedi — manifest veya data/norm/ boş olabilir.")
+        print("Hic chunk uretilmedi - manifest veya data/norm/ bos olabilir.")
         return
- 
+
     lengths = [c["char_len"] for c in all_chunks]
     sorted_lengths = sorted(lengths)
     madde_bilinen = sum(1 for c in all_chunks if c.get("madde_no"))
- 
-    print(f"Toplam Chunk Sayısı : {len(lengths)}")
+    asan = sum(1 for x in lengths if x > MAX_CHUNK)
+
+    print(f"Toplam Chunk Sayisi : {len(lengths)}")
     print(f"Min Karakter        : {min(lengths)}")
     print(f"Medyan Karakter     : {statistics.median(lengths)}")
-    # P90: chunk'ların %90'ı bu uzunluğun altında. Birkaç aşırı uzun chunk
-    # ortalamayı çarpıtır ama P90'ı çarpıtmaz — o yüzden ortalamadan bilgilendirici.
     print(f"P90 Karakter        : {sorted_lengths[int(len(sorted_lengths) * 0.90)]}")
     print(f"Max Karakter        : {max(lengths)}")
+    print(f"MAX_CHUNK asan      : {asan}   (0 olmali)")
     print(f"Madde no bulunan    : {madde_bilinen}/{len(all_chunks)} "
           f"(%{madde_bilinen / len(all_chunks) * 100:.1f})")
- 
- 
+
+
 if __name__ == "__main__":
     main()
-
-   
