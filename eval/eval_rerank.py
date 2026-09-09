@@ -1,94 +1,43 @@
+"""
+Dense vs dense+cross-encoder rerank karşılaştırması.
+
+Kullanım: python eval/eval_rerank.py
+
+Sonuçları eval/sonuclar.json'a yazar; app.py sidebar tablosunu oradan okur
+(rakamlar eskiden arayüze elle yazılıydı ve ölçüm yenilenince eskiyordu).
+
+METODOLOJİ NOTU — rerank hit@10 hakkında:
+  Rerank, dense'in getirdiği AYNI N_CANDIDATES adayı yeniden sıralar; havuza
+  yeni aday eklemez. Dolayısıyla rerank hit@N_CANDIDATES, dense
+  hit@N_CANDIDATES'e TANIM GEREĞİ eşittir. Dense hit@10 reranker'ın TAVANIDIR.
+  Tabloda ikisi de gösteriliyor; eşit çıkması hata değil, beklenen davranıştır.
+"""
+
 import json
+import sys
 import time
 from pathlib import Path
 
-import chromadb
-import numpy as np
-from sentence_transformers import SentenceTransformer,CrossEncoder
-
 KOK = Path(__file__).parent.parent
+sys.path.insert(0, str(KOK))
+sys.path.insert(0, str(Path(__file__).parent))
+
+import rag_core as rc                                          # noqa: E402
+from metrikler import (                                        # noqa: E402
+    K_DEGERLERI,
+    dogru_mu_chunk,
+    dogru_mu_madde,
+    metrikleri_hesapla,
+    wilson_alt_sinir,
+)
+
 EVAL_PATH = KOK / "eval_set.jsonl"
-DB_DIR = KOK / "data" / "chroma_db"
-COLLECTION_NAME = "mevzuat_strategy_b"
-MODEL_NAME = "intfloat/multilingual-e5-small"
-RERANK_MODEL = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
-
-N_CANDIDATES= 10
-K_DEGERLERI = [1,3,5,10]
-
-def dogru_mu(meta:dict,beklenen:dict)->bool:
-    return (meta.get("doc_id") == beklenen.get("doc_id")) and str(meta.get("madde_no")) == str(beklenen.get("madde_no"))
+SONUC_PATH = KOK / "eval" / "sonuclar.json"
 
 
-def metrikleri_hesapla(siralamalar:list[list[dict]], sorular:list[dict])->dict:
-    hits = {k:0 for k in K_DEGERLERI}
-    rr = []
-
-    for metadatalar,item in zip(siralamalar,sorular): #ziplemek her soru için sıralı olan metadata listesini eşleştiriyor
-        bulunan_rank = None
-        for rank,meta in enumerate(metadatalar):
-            if dogru_mu(meta,item):
-                bulunan_rank = rank
-                break
-
-        if bulunan_rank is None:
-            rr.append(0.0)
-        else:
-            rr.append(1 / (bulunan_rank + 1))
-            for k in K_DEGERLERI:
-                if bulunan_rank < k:
-                    hits[k] += 1
-    n = len(sorular)
-    sonuc = {f"hit@{k}": hits[k] / n for k in K_DEGERLERI}
-    sonuc["MRR"] = sum(rr) / n
-    return sonuc
-
-def main():
-    sorular = [json.loads(s) for s in open(EVAL_PATH,encoding="utf-8")]
-    print(f"{len(sorular)} soru yüklendi")
- 
-    print("Modeller yükleniyor...")
-    embed_model = SentenceTransformer(MODEL_NAME)
-    cross_encoder = CrossEncoder(RERANK_MODEL)
-
-    client = chromadb.PersistentClient(path=str(DB_DIR))
-    collection = client.get_collection(COLLECTION_NAME)
-
-    dense_siralamalar = []
-    rerank_siralamalar = []
-    dense_sureler = []
-    rerank_sureler = []
-
-    for i,item in enumerate(sorular,1):
-        t0 = time.perf_counter()
-        q_vec = embed_model.encode(f"query: {item['soru']}",normalize_embeddings=True)
-
-        sonuc = collection.query(query_embeddings=[q_vec.tolist()],n_results=N_CANDIDATES)
-        dense_sureler.append(time.perf_counter() -t0)
-
-        metadatalar = sonuc["metadatas"][0]
-        documents = sonuc["documents"][0]
-        dense_siralamalar.append(metadatalar)
-
-
-        #cross-encoder rerank
-        t0 = time.perf_counter()
-
-        pairs = [(item["soru"],doc) for doc in documents]
-        skorlar = cross_encoder.predict(pairs)
-
-        sirali_idx = np.argsort(skorlar)[::-1]
-        rerank_siralamalar.append([metadatalar[j] for j in sirali_idx])
-        rerank_sureler.append(time.perf_counter() - t0)
-
-        print(f"[{i}/{len(sorular)}]",end="\r")
-
-    dense_m = metrikleri_hesapla(dense_siralamalar, sorular)
-    rerank_m = metrikleri_hesapla(rerank_siralamalar, sorular)
-    
-    n = len(sorular)
+def tablo_yaz(baslik, dense_m, rerank_m):
     print("\n" + "=" * 66)
-    print("DENSE vs DENSE + CROSS-ENCODER RERANK")
+    print(baslik)
     print("=" * 66)
     print(f"{'Metrik':<10} {'Dense':>12} {'Rerank':>12} {'Fark':>12}")
     print("-" * 66)
@@ -100,15 +49,72 @@ def main():
             print(f"{anahtar:<10} {d:>12.3f} {r:>12.3f} {isaret + f'{fark:.3f}':>12}")
         else:
             print(f"{anahtar:<10} {d * 100:>11.1f}% {r * 100:>11.1f}% "
-                f"{isaret + f'{fark * 100:.1f}':>11}%")
-    
+                  f"{isaret + f'{fark * 100:.1f}':>11}%")
+
+
+def main():
+    sorular = [json.loads(s) for s in open(EVAL_PATH, encoding="utf-8")]
+    n = len(sorular)
+    print(f"{n} soru yüklendi")
+
+    print("Modeller yükleniyor...")
+    embed_model, cross_encoder, collection = rc.yukle_sistem()
+    cihaz = rc.cihaz_bilgisi(embed_model)
+    # Süreler cihaza göre ~100x değişiyor (GPU ~50ms, CPU ~10s). Hangi koşulda
+    # ölçüldüğü kayıtta olmazsa rakamlar birkaç hafta sonra yorumlanamaz olur.
+    print(f"Cihaz: {cihaz}\n")
+
+    dense_siralamalar, rerank_siralamalar = [], []
+    dense_sureler, rerank_sureler = [], []
+
+    for i, item in enumerate(sorular, 1):
+        t0 = time.perf_counter()
+        adaylar = rc.dense_ara(item["soru"], collection, embed_model)
+        dense_sureler.append(time.perf_counter() - t0)
+        dense_siralamalar.append(adaylar)
+
+        t0 = time.perf_counter()
+        rerank_siralamalar.append(rc.rerank(item["soru"], adaylar, cross_encoder))
+        rerank_sureler.append(time.perf_counter() - t0)
+
+        print(f"[{i}/{n}]", end="\r")
+
+    dense_madde = metrikleri_hesapla(dense_siralamalar, sorular, dogru_mu_madde)
+    rerank_madde = metrikleri_hesapla(rerank_siralamalar, sorular, dogru_mu_madde)
+    dense_chunk = metrikleri_hesapla(dense_siralamalar, sorular, dogru_mu_chunk)
+    rerank_chunk = metrikleri_hesapla(rerank_siralamalar, sorular, dogru_mu_chunk)
+
+    tablo_yaz("MADDE DUZEYI (gevsek): doc_id + madde_no eslesmesi",
+              dense_madde, rerank_madde)
+    tablo_yaz("CHUNK DUZEYI (kati): chunk_id birebir eslesmesi",
+              dense_chunk, rerank_chunk)
+
     print("-" * 66)
     d_ms = sum(dense_sureler) / n * 1000
     r_ms = sum(rerank_sureler) / n * 1000
     print(f"{'Süre':<10} {d_ms:>11.0f}ms {d_ms + r_ms:>11.0f}ms "
-        f"{'+' + f'{r_ms:.0f}':>11}ms")
- 
- 
-if __name__ == "__main__":
-    main() 
+          f"{'+' + f'{r_ms:.0f}':>11}ms   (cihaz: {cihaz})")
 
+    # Güven aralığı: "%100" tek başına yanıltıcı, n=34'te alt sınır ~%90.
+    print("\n%95 guven araligi alt siniri (Wilson), rerank / madde duzeyi:")
+    for k in K_DEGERLERI:
+        oran = rerank_madde[f"hit@{k}"]
+        alt = wilson_alt_sinir(round(oran * n), n)
+        print(f"  hit@{k:<3}: %{oran * 100:5.1f}   (alt sinir %{alt * 100:.1f})")
+
+    SONUC_PATH.write_text(json.dumps({
+        "soru_sayisi": n,
+        "cihaz": cihaz,
+        "eslestirme": "madde düzeyi (doc_id + madde_no)",
+        "dense": dense_madde,
+        "rerank": rerank_madde,
+        "dense_chunk_duzeyi": dense_chunk,
+        "rerank_chunk_duzeyi": rerank_chunk,
+        "dense_ms": d_ms,
+        "rerank_ms": r_ms,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"\n-> {SONUC_PATH}")
+
+
+if __name__ == "__main__":
+    main()
